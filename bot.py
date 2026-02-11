@@ -174,6 +174,9 @@ async def on_message(message):
                 await message.channel.send("You cannot absolve that which has not committed sin.")
                 return
             del violations[user.id]
+
+            if user.id in marked:
+                marked.remove(user.id)
             save_violations()
             await message.channel.send(f"The sins of {targetedMember} have been absolved. Watch them closely.")
         else:
