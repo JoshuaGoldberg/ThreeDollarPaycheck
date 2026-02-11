@@ -1,9 +1,11 @@
 # bot.py
 import os
 import discord
+from discord.ext import tasks
 from dotenv import load_dotenv
 import spacy
 import json
+import datetime
 
 from util import *
 
@@ -16,6 +18,7 @@ client = discord.Client(intents=intents)
 
 banned_set = set(banned_words)
 violations = {}
+immunities = {}
 marked = []
 
 cast_judgement = True
@@ -27,11 +30,12 @@ nlp = spacy.load('en_core_web_sm')
 
 def save_violations():
     with open("data.txt", "w") as f:
-        json.dump({"violations": violations, "marked": marked}, f)
+        json.dump({"violations": violations, "immunities": immunities, "marked": marked}, f)
 
 
 def load_violations():
     global violations
+    global immunities
     global marked
 
     try:
@@ -39,15 +43,36 @@ def load_violations():
             data = json.load(f)
             violations = data.get("violations", {})
             violations = {int(k): v for k, v in violations.items()}
+            immunities = data.get("immunities", {})
+            immunities = {int(k): v for k, v in immunities.items()}
             marked = data.get("marked", [])
     except FileNotFoundError:
         violations = {}
         marked = []
 
 
+announcement_time = datetime.time(hour=15, minute=0, second=0)
+
+
+@tasks.loop(time=announcement_time)
+async def Announcement():
+    guild = client.get_guild(1262846261934035065)
+
+    print("Announcement Sending!")
+    channel = client.get_channel(1349929053532061787)
+    if channel is None:
+        print("Channel not found!")
+        return
+    await channel.send("Good morning, and welcome to a new day in our wonderful new society.\n"
+                       "All current users have gained an immunity token.")
+    for member in guild.members:
+        update_immunity(member.id, 1)
+
+
 @client.event
 async def on_ready():
     load_violations()
+    Announcement.start()
     print(f'{client.user} has connected to Discord!')
     guild = discord.utils.get(client.guilds, name=GUILD)
     print(
@@ -72,13 +97,38 @@ def is_past_tense(sentence):
 
 
 def update_violation(userId):
+    violation_strength = multiplier
+    immune_score = 0
+
+    if immunities.get(userId):
+        immune_score = immunities.get(userId)
+
+    immunity_left = 0
+    violations_left = 0
+
+    if violation_strength > immune_score:
+        violations_left = violation_strength - immune_score
+    elif violation_strength <= immune_score:
+        immunity_left = immune_score - violation_strength
+
+    immunities.update({userId: immunity_left})
+
     if userId not in violations:
-        violations.update({userId: (1 * multiplier)})
+        violations.update({userId: violations_left})
     else:
-        violations.update({userId: violations.get(userId) + (1 * multiplier)})
+        violations.update({userId: violations.get(userId) + violations_left})
 
     if violations.get(userId) >= 5 and userId not in marked:
         marked.append(userId)
+
+
+def update_immunity(userId, amount):
+    if userId not in immunities:
+        immunities.update({userId: amount})
+    else:
+        immunities.update({userId: immunities.get(userId) + amount})
+
+    save_violations()
 
 
 def username_to_member(guild: discord.Guild, name: str):
@@ -101,8 +151,14 @@ async def on_message(message):
     if message.author.name == 'crabchip' and message.content == '>blind':
         violations.clear()
         marked.clear()
+        immunities.clear()
         save_violations()
         await message.channel.send("All has been wiped in this land of ash and dust.")
+        return
+
+    if message.author.name == 'crabchip' and message.content == '>immune_debug':
+        update_immunity(memberId, 100)
+        await message.channel.send("Done.")
         return
 
     if message.author.name == 'crabchip' and message.content.startswith('>absolve '):
@@ -122,7 +178,6 @@ async def on_message(message):
             await message.channel.send(f"The sins of {targetedMember} have been absolved. Watch them closely.")
         else:
             await message.channel.send("You cannot absolve that which has not committed sin.")
-
         return
 
     if memberId in marked:
@@ -159,6 +214,20 @@ async def on_message(message):
 
             await message.channel.send(f"The eye of judgement has entered configuration: {eye_status}.")
             return
+
+        if message.content == '>info':
+            immune_count = 0
+            violation_count = 0
+
+            if immunities.get(memberId):
+                immune_count = immunities.get(memberId)
+
+            if violations.get(memberId):
+                violation_count = violations.get(memberId)
+
+            await message.channel.send(f"**{member.name}'s Information Panel**\n"
+                                       f"Immunity tokens: {immune_count}\n"
+                                       f"Violations: {violation_count}")
 
         if message.content == '>rankings':
             paragons = ""
