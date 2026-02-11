@@ -105,6 +105,26 @@ async def on_message(message):
         await message.channel.send("All has been wiped in this land of ash and dust.")
         return
 
+    if message.author.name == 'crabchip' and message.content.startswith('>absolve '):
+        targetedMember = message.content[9:]
+        user = username_to_member(guild, targetedMember)
+
+        if not user:
+            await message.channel.send("who is that bro.")
+            return
+
+        if violations.get(user.id):
+            if violations.get(user.id) == 0:
+                await message.channel.send("You cannot absolve that which has not committed sin.")
+                return
+            del violations[user.id]
+            save_violations()
+            await message.channel.send(f"The sins of {targetedMember} have been absolved. Watch them closely.")
+        else:
+            await message.channel.send("You cannot absolve that which has not committed sin.")
+
+        return
+
     if memberId in marked:
         await message.delete()
         return
