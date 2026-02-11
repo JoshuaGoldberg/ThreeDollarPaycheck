@@ -3,6 +3,7 @@ import os
 import discord
 from dotenv import load_dotenv
 import spacy
+import json
 
 from util import *
 
@@ -24,8 +25,29 @@ multiplier = 1
 nlp = spacy.load('en_core_web_sm')
 
 
+def save_violations():
+    with open("data.txt", "w") as f:
+        json.dump({"violations": violations, "marked": marked}, f)
+
+
+def load_violations():
+    global violations
+    global marked
+
+    try:
+        with open("data.txt", "r") as f:
+            data = json.load(f)
+            violations = data.get("violations", {})
+            violations = {int(k): v for k, v in violations.items()}
+            marked = data.get("marked", [])
+    except FileNotFoundError:
+        violations = {}
+        marked = []
+
+
 @client.event
 async def on_ready():
+    load_violations()
     print(f'{client.user} has connected to Discord!')
     guild = discord.utils.get(client.guilds, name=GUILD)
     print(
@@ -79,6 +101,7 @@ async def on_message(message):
     if message.author.name == 'crabchip' and message.content == '>blind':
         violations.clear()
         marked.clear()
+        save_violations()
         await message.channel.send("All has been wiped in this land of ash and dust.")
         return
 
@@ -189,6 +212,7 @@ async def on_message(message):
 
             if word:
                 update_violation(message.author.id)
+                save_violations()
 
                 await message.channel.send(
                     f"WARNING! Your message contains the following banned {tense}: **{', '.join(word)}**. Remember that "
