@@ -1,6 +1,6 @@
 # bot.py
-import os
 import discord
+import os
 from discord.ext import tasks
 from dotenv import load_dotenv
 import spacy
@@ -31,49 +31,7 @@ multiplier = 1
 
 nlp = spacy.load('en_core_web_sm')
 
-TMDB_API_KEY = os.getenv('MOVIE_API')
-
-def get_anilist_list(username, media_type="ANIME"):
-    query = '''
-    query ($name: String, $type: MediaType) {
-        MediaListCollection(userName: $name, type: $type) {
-            lists {
-                name
-                entries {
-                    score
-                    progress
-                    media {
-                        title {
-                            english
-                            romaji
-                        }
-                        episodes
-                        chapters
-                    }
-                }
-            }
-        }
-    }
-    '''
-
-    variables = {'name': username, 'type': media_type}
-
-    response = requests.post(
-        'https://graphql.anilist.co',
-        json={'query': query, 'variables': variables}
-    )
-
-    shows = []
-
-    if response.status_code == 200:
-        data = response.json()
-        data_chunk = data.get('data', {}).get('MediaListCollection')
-        data_lists = data_chunk['lists'][0]['entries']
-        for entry in data_lists:
-            shows.append(entry['media']['title']['english'])
-        return shows
-    return None
-
+from anime import *
 
 anime_list = get_anilist_list("SunApple", "ANIME")
 
@@ -207,11 +165,18 @@ async def on_message(message):
         return
 
     if message.content == '>a':
-        random_index = random.randint(0, len(anime_list) - 1)
-        anime_name = anime_list[random_index]
-        await message.channel.send(f"{anime_name}")
-        image_url = get_anime_screenshot(anime_name)
-        await message.channel.send(f"{image_url}")
+        MAX_TRIES = 12
+
+        for _ in range(MAX_TRIES):
+            anime_name = random.choice(anime_list)
+
+            image_url = get_anime_screenshot(anime_name)
+            if image_url:
+                await message.channel.send(f"{anime_name}")
+                await message.channel.send(image_url)
+                return
+
+        await message.channel.send(f"Couldn't find an episode still after {MAX_TRIES} tries. (TMDB coverage issue)")
         return
 
     if message.author.name == 'crabchip' and message.content == '>immune_debug':
