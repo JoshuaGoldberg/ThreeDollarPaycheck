@@ -322,7 +322,9 @@ async def on_message(message):
                 if guildMember.id != client.user.id:
                     if guildMember.id in violations:
                         score = violations[guildMember.id]
-                        if score <= 2:
+                        if score == 0:
+                            paragons += f"{guildMember.name}: 0\n"
+                        elif score <= 2:
                             okay += f"{guildMember.name}: {score}\n"
                         elif score < 5:
                             bad += f"{guildMember.name}: {score}\n"
