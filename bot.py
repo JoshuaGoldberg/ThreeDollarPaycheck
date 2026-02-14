@@ -6,7 +6,9 @@ from dotenv import load_dotenv
 import spacy
 import json
 import datetime
-
+from AnilistPython import Anilist
+import requests
+import random
 from util import *
 
 intents = discord.Intents.all()
@@ -21,11 +23,59 @@ violations = {}
 immunities = {}
 marked = []
 
+anilist = Anilist()
+
 cast_judgement = True
 
 multiplier = 1
 
 nlp = spacy.load('en_core_web_sm')
+
+TMDB_API_KEY = os.getenv('MOVIE_API')
+
+def get_anilist_list(username, media_type="ANIME"):
+    query = '''
+    query ($name: String, $type: MediaType) {
+        MediaListCollection(userName: $name, type: $type) {
+            lists {
+                name
+                entries {
+                    score
+                    progress
+                    media {
+                        title {
+                            english
+                            romaji
+                        }
+                        episodes
+                        chapters
+                    }
+                }
+            }
+        }
+    }
+    '''
+
+    variables = {'name': username, 'type': media_type}
+
+    response = requests.post(
+        'https://graphql.anilist.co',
+        json={'query': query, 'variables': variables}
+    )
+
+    shows = []
+
+    if response.status_code == 200:
+        data = response.json()
+        data_chunk = data.get('data', {}).get('MediaListCollection')
+        data_lists = data_chunk['lists'][0]['entries']
+        for entry in data_lists:
+            shows.append(entry['media']['title']['english'])
+        return shows
+    return None
+
+
+anime_list = get_anilist_list("SunApple", "ANIME")
 
 
 def save_violations():
@@ -51,15 +101,15 @@ def load_violations():
         marked = []
 
 
-announcement_time = datetime.time(hour=15, minute=0, second=0)
+announcement_time = datetime.time(hour=16, minute=18, second=0)
 
 
 @tasks.loop(time=announcement_time)
 async def Announcement():
-    guild = client.get_guild(1262846261934035065)
+    guild = client.get_guild(int(os.getenv('DELLE_GUILD')))
 
     print("Announcement Sending!")
-    channel = client.get_channel(1349929053532061787)
+    channel = client.get_channel(int(os.getenv('DELLE_GENERAL')))
     if channel is None:
         print("Channel not found!")
         return
@@ -154,6 +204,14 @@ async def on_message(message):
         immunities.clear()
         save_violations()
         await message.channel.send("All has been wiped in this land of ash and dust.")
+        return
+
+    if message.content == '>a':
+        random_index = random.randint(0, len(anime_list) - 1)
+        anime_name = anime_list[random_index]
+        await message.channel.send(f"{anime_name}")
+        image_url = get_anime_screenshot(anime_name)
+        await message.channel.send(f"{image_url}")
         return
 
     if message.author.name == 'crabchip' and message.content == '>immune_debug':
