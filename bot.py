@@ -1,4 +1,6 @@
 # bot.py
+import asyncio
+
 import discord
 import os
 from discord.ext import tasks
@@ -7,8 +9,7 @@ import spacy
 import json
 import datetime
 from AnilistPython import Anilist
-import requests
-import random
+from difflib import SequenceMatcher
 from util import *
 
 intents = discord.Intents.all()
@@ -22,6 +23,10 @@ banned_set = set(banned_words)
 violations = {}
 immunities = {}
 marked = []
+anime_name = ""
+anime_titles = []
+playing_game = False
+curr_round = 0
 
 anilist = Anilist()
 
@@ -33,8 +38,8 @@ nlp = spacy.load('en_core_web_sm')
 
 from anime import *
 
-anime_list = get_anilist_list("SunApple", "ANIME")
-
+anime_map = get_anilist_list("SunApple", "ANIME")
+anime_list = list(anime_map.keys())
 
 def save_violations():
     with open("data.txt", "w") as f:
@@ -45,6 +50,7 @@ def load_violations():
     global violations
     global immunities
     global marked
+    global curr_round
 
     try:
         with open("data.txt", "r") as f:
@@ -88,6 +94,9 @@ async def on_ready():
         f'{guild.name}(id: {guild.id})'
     )
 
+def is_close_enough(guess, answer, threshold=0.75):
+    ratio = SequenceMatcher(None, guess.strip().lower(), answer.strip().lower()).ratio()
+    return ratio >= threshold
 
 def is_past_tense(sentence):
     bad = []
@@ -145,16 +154,35 @@ def username_to_member(guild: discord.Guild, name: str):
             return member
     return None
 
+async def send_screenshot(channel):
+    image_url = get_anime_screenshot(anime_name)
+    embedVar = discord.Embed(title="Screenshot", color=0x8000FF)
+    embedVar.set_image(url=image_url)
+    await channel.send(embed=embedVar)
+
+async def send_time_warning(channel):
+    embedVar = discord.Embed(title="Alert", description="10 Seconds Remain.", color=0xFF0000)
+    await channel.send(embed=embedVar)
 
 @client.event
 async def on_message(message):
+    global anime_name
+    global curr_round
+    global anime_titles
     global cast_judgement
+    global playing_game
     global multiplier
 
     guild = message.guild
     member = guild.get_member(message.author.id)
     memberId = message.author.id
     botId = client.user.id
+
+    if playing_game and botId is not message.author.id and any(is_close_enough(message.content, t) for t in anime_titles):
+        playing_game = False
+        await message.channel.send(f"You have passed the test. The show was: {anime_name}. You have gained 1 immunity token.")
+        curr_round += 1
+        update_immunity(memberId, 1)
 
     if message.author.name == 'crabchip' and message.content == '>blind':
         violations.clear()
@@ -165,19 +193,48 @@ async def on_message(message):
         return
 
     if message.content == '>a':
-        MAX_TRIES = 12
+        # anime game logic
+        if not playing_game:
+            playing_game = True
+            MAX_TRIES = 12
 
-        for _ in range(MAX_TRIES):
-            anime_name = random.choice(anime_list)
+            for _ in range(MAX_TRIES):
+                anime_name = random.choice(anime_list)
+                anime_titles = anime_map[anime_name] + get_mal_synonyms(anime_name)
 
-            image_url = get_anime_screenshot(anime_name)
-            if image_url:
-                await message.channel.send(f"{anime_name}")
-                await message.channel.send(image_url)
-                return
+                image_url = get_anime_screenshot(anime_name)
+                if image_url:
+                    this_round = curr_round
+                    await message.channel.send(f"{anime_name}")
+                    await message.channel.send(f"{anime_titles}")
+                    embedVar = discord.Embed(title="Screenshot", color=0x8000FF)
+                    embedVar.set_image(url=image_url)
+                    await message.channel.send(embed=embedVar)
+                    await asyncio.sleep(10)
+                    if not playing_game or this_round != curr_round:
+                        return
+                    await send_screenshot(message.channel)
+                    await asyncio.sleep(10)
+                    if not playing_game or this_round != curr_round:
+                        return
+                    await send_screenshot(message.channel)
+                    await asyncio.sleep(10)
+                    if not playing_game or this_round != curr_round:
+                        return
+                    await send_time_warning(message.channel)
+                    await asyncio.sleep(10)
+                    if not playing_game or this_round != curr_round:
+                        return
+                    await message.channel.send(f"You have failed the test. The anime was {anime_name}. You have gained 1 violation.")
+                    playing_game = False
+                    curr_round += 1
+                    update_violation(memberId)
+                    return
 
-        await message.channel.send(f"Couldn't find an episode still after {MAX_TRIES} tries. (TMDB coverage issue)")
-        return
+            await message.channel.send(f"Couldn't find an episode still after {MAX_TRIES} tries. Please try again.")
+            return
+        else:
+            await message.channel.send("Game in progress.")
 
     if message.author.name == 'crabchip' and message.content == '>immune_debug':
         update_immunity(memberId, 100)

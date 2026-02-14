@@ -11,6 +11,7 @@ TMDB_BASE = "https://api.themoviedb.org/3"
 _cfg = None
 
 
+# make a call to the TMDB API
 def tmdb(path, **params):
     if not TMDB_API_KEY:
         return None
@@ -43,7 +44,35 @@ def pick(items):
     return random.choice(items).get("file_path") if items else None
 
 
+MAL_CLIENT_ID = os.getenv("MAL_CLIENT_ID")
+
+
+def get_mal_synonyms(name):
+    r = requests.get(
+        "https://api.myanimelist.net/v2/anime",
+        params={"q": name, "limit": 1, "fields": "alternative_titles"},
+        headers={"X-MAL-CLIENT-ID": MAL_CLIENT_ID},
+        timeout=5
+    )
+    if r.status_code != 200:
+        return []
+
+    results = r.json().get("data") or []
+    if not results:
+        return []
+
+    anime = results[0]["node"]
+    alt = anime.get("alternative_titles", {})
+    titles = [anime.get("title", "")]
+    if alt.get("en"): titles.append(alt["en"])
+    if alt.get("ja"): titles.append(alt["ja"])
+    titles += alt.get("synonyms", [])
+
+    return titles
+
+
 def get_anime_screenshot(title):
+    # try show
     for q in queries(title):
         for s in (tmdb("/search/tv", query=q, language="en-US", include_adult="true", page=1) or {}).get("results") or []:
             seasons = [s for s in (tmdb(f"/tv/{s['id']}", language="en-US") or {}).get("seasons") or []
@@ -58,6 +87,7 @@ def get_anime_screenshot(title):
                     return url
             break
 
+    # try movie
     for q in queries(title):
         for m in (tmdb("/search/movie", query=q, language="en-US", include_adult="true", page=1) or {}).get("results") or []:
             imgs = tmdb(f"/movie/{m['id']}/images") or {}
@@ -99,13 +129,21 @@ def get_anilist_list(username, media_type="ANIME"):
         json={'query': query, 'variables': variables}
     )
 
-    shows = []
+    if response.status_code != 200:
+        return None
 
-    if response.status_code == 200:
-        data = response.json()
-        data_chunk = data.get('data', {}).get('MediaListCollection')
-        data_lists = data_chunk['lists'][0]['entries']
-        for entry in data_lists:
-            shows.append(entry['media']['title']['english'])
-        return shows
-    return None
+    shows = {}
+    data = response.json()
+    data_lists = data['data']['MediaListCollection']['lists'][0]['entries']
+
+    for entry in data_lists:
+        media = entry['media']
+        title = media['title']
+        primary = title.get('english') or title.get('romaji')
+        alt_titles = set()
+        for t in title.values():
+            if t:
+                alt_titles.add(t)
+        shows[primary] = list(alt_titles)
+
+    return shows
